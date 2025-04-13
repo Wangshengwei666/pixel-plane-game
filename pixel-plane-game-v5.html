@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <style>
+        /* 保持原有样式完全不变 */
+        * { margin:0; padding:0; box-sizing:border-box; }
+        body { overflow:hidden; background:#000; touch-action:none; position:fixed; width:100%; height:100%; }
+        #gameContainer { position:relative; width:100vw; height:100vh; display:flex; justify-content:center; align-items:center; }
+        #gameCanvas { background:#111; border:2px solid #333; image-rendering:crisp-edges; }
+        #gameInfo { position:absolute; top:10px; left:10px; color:#FFF; font-family:Arial; font-size:20px; text-shadow:2px 2px #000; z-index:1; }
+        #gameOver { position:absolute; color:#FF0000; font-size:40px; display:none; text-shadow:2px 2px #000; }
+        #gameWin { position:absolute; color:#00FF00; font-size:40px; display:none; text-shadow:2px 2px #000; }
+    </style>
+</head>
+<body>
+    <div id="gameContainer">
+        <div id="gameInfo">分数: <span id="score">0</span> 等级: <span id="weaponLevel">1</span></div>
+        <div id="gameOver">游戏结束!</div>
+        <div id="gameWin">胜利!</div>
+        <canvas id="gameCanvas"></canvas>
+    </div>
+
+    <script>
+        // 初始化画布（完全保持原有代码不变）
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        let devicePixelRatio = window.devicePixelRatio || 1;
+
+        function resizeCanvas() {
+            const baseWidth = 400, baseHeight = 600;
+            const displayWidth = Math.min(window.innerWidth, baseWidth);
+            const displayHeight = Math.min(window.innerHeight, baseHeight);
+            
+            canvas.style.width = `${displayWidth}px`;
+            canvas.style.height = `${displayHeight}px`;
+            canvas.width = baseWidth * devicePixelRatio;
+            canvas.height = baseHeight * devicePixelRatio;
+            
+            ctx.scale(devicePixelRatio, devicePixelRatio);
+        }
+
+        window.addEventListener('resize', resizeCanvas);
+        window.addEventListener('load', () => {
+            resizeCanvas();
+            gameLoop();
+        });
+
+        // 游戏状态（仅新增bossHealth）
+        let score = 0;
+        let gameRunning = true;
+        let weaponLevel = 1;
+        let bossAppeared = false;
+        let bossHealth = 20; // 保持原有血量设置
+        let bossKilled = false;
+
+        // 玩家设置（完全保持原有代码）
+        const player = {
+            x: 185, y: 500, width:30, height:40, speed:6, color:'#00FF00'
+        };
+
+        // 子弹系统（完全保持原有代码）
+        let bullets = [];
+        const bulletConfig = { speed:8, width:4, height:12, color:'#FFFF00', interval:300 };
+        let lastShootTime = 0;
+
+        // 敌机系统（完全保持原有代码）
+        let enemies = [];
+        const enemyConfig = {
+            baseSpeed: 2.5,
+            baseInterval: 1000,
+            get speed() { return this.baseSpeed + weaponLevel*0.5; },
+            width:30, height:30,
+            colors: ['#FF0000','#FF00FF','#00FFFF'],
+            lastSpawn:0
+        };
+
+        // Boss设置（仅新增血条绘制代码）
+        let boss = {
+            x: 150,
+            y: -100,
+            width: 80,
+            height: 80,
+            speed: 1.5,
+            color: '#FF4500',
+            direction: 1
+        };
+
+        // 新增血条绘制函数（仅添加这部分）
+        function drawBossHealth() {
+            if(!bossAppeared || bossKilled) return;
+            
+            // 血条背景
+            ctx.fillStyle = '#333';
+            ctx.fillRect(boss.x, boss.y - 15, boss.width, 4);
+            
+            // 当前血量
+            const healthWidth = (bossHealth/20) * boss.width;
+            ctx.fillStyle = '#FF0000';
+            ctx.fillRect(boss.x, boss.y - 15, healthWidth, 4);
+        }
+
+        // 控制系统（完全保持原有代码）
+        const keys = {};
+        window.addEventListener('keydown', (e) => keys[e.key] = true);
+        window.addEventListener('keyup', (e) => keys[e.key] = false);
+
+        // 触摸控制（完全保持原有代码）
+        let touchStartX = 0, touchStartY = 0, isTouching = false;
+        canvas.addEventListener('touchstart', (e) => {
+            e.preventDefault();
+            const touch = e.touches[0];
+            const rect = canvas.getBoundingClientRect();
+            touchStartX = (touch.clientX - rect.left) / (rect.width / 400);
+            touchStartY = (touch.clientY - rect.top) / (rect.height / 600);
+            isTouching = true;
+        });
+        canvas.addEventListener('touchmove', (e) => {
+            e.preventDefault();
+            if (!isTouching) return;
+            const touch = e.touches[0];
+            const rect = canvas.getBoundingClientRect();
+            const x = (touch.clientX - rect.left) / (rect.width / 400);
+            const y = (touch.clientY - rect.top) / (rect.height / 600);
+            
+            player.x += (x - touchStartX) * 2;
+            player.y += (y - touchStartY) * 2;
+            player.x = Math.max(0, Math.min(370, player.x));
+            player.y = Math.max(0, Math.min(560, player.y));
+            touchStartX = x;
+            touchStartY = y;
+        });
+        canvas.addEventListener('touchend', () => isTouching = false);
+
+        // 敌机生成（完全保持原有代码）
+        function spawnEnemy() {
+            if(bossAppeared) return;
+            
+            const now = Date.now();
+            if (now - enemyConfig.lastSpawn > enemyConfig.baseInterval) {
+                for(let i=0; i<Math.min(weaponLevel,3); i++){ 
+                    enemies.push({
+                        x: Math.random()*(400-30),
+                        y: -30 - i*40,
+                        width:enemyConfig.width,
+                        height:enemyConfig.height,
+                        color: enemyConfig.colors[Math.floor(Math.random()*3)]
+                    });
+                }
+                enemyConfig.lastSpawn = now;
+            }
+        }
+
+        // 碰撞检测（完全保持原有代码）
+        function checkCollisions() {
+            bullets.forEach((bullet, bIndex) => {
+                enemies.forEach((enemy, eIndex) => {
+                    if (bullet.x < enemy.x + enemyConfig.width &&
+                        bullet.x + bulletConfig.width > enemy.x &&
+                        bullet.y < enemy.y + enemyConfig.height &&
+                        bullet.y + bulletConfig.height > enemy.y) {
+                        
+                        bullets.splice(bIndex,1);
+                        enemies.splice(eIndex,1);
+                        score += 10 * weaponLevel;
+                        document.getElementById('score').textContent = score;
+
+                        const newLevel = Math.min(10, Math.floor(score/500)+1);
+                        if(newLevel !== weaponLevel){
+                            weaponLevel = newLevel;
+                            document.getElementById('weaponLevel').textContent = weaponLevel;
+                        }
+                    }
+                });
+
+                if(bossAppeared && !bossKilled) {
+                    if (bullet.x < boss.x + boss.width &&
+                        bullet.x + bulletConfig.width > boss.x &&
+                        bullet.y < boss.y + boss.height &&
+                        bullet.y + bulletConfig.height > boss.y) {
+                        
+                        bullets.splice(bIndex,1);
+                        bossHealth--;
+                        if(bossHealth <= 0) {
+                            bossKilled = true;
+                            document.getElementById('gameWin').style.display = 'block';
+                            gameRunning = false;
+                        }
+                    }
+                }
+            });
+
+            enemies.forEach(enemy => {
+                if (player.x < enemy.x + enemyConfig.width &&
+                    player.x + player.width > enemy.x &&
+                    player.y < enemy.y + enemyConfig.height &&
+                    player.y + player.height > enemy.y) {
+                    gameRunning = false;
+                    document.getElementById('gameOver').style.display = 'block';
+                }
+            });
+
+            if(bossAppeared && !bossKilled) {
+                if (player.x < boss.x + boss.width &&
+                    player.x + player.width > boss.x &&
+                    player.y < boss.y + boss.height &&
+                    player.y + player.height > boss.y) {
+                    gameRunning = false;
+                    document.getElementById('gameOver').style.display = 'block';
+                }
+            }
+        }
+
+        // 游戏循环（仅添加血条绘制调用）
+        function gameLoop() {
+            if (!gameRunning) return;
+
+            ctx.clearRect(0, 0, 400, 600);
+
+            // 玩家移动（保持原有）
+            if (keys.ArrowLeft) player.x = Math.max(0, player.x - player.speed);
+            if (keys.ArrowRight) player.x = Math.min(370, player.x + player.speed);
+            if (keys.ArrowUp) player.y = Math.max(0, player.y - player.speed);
+            if (keys.ArrowDown) player.y = Math.min(560, player.y + player.speed);
+
+            // 子弹生成（保持原有）
+            const now = Date.now();
+            if (now - lastShootTime > bulletConfig.interval) {
+                const offsets = [-10,0,10];
+                for(let i=0; i<weaponLevel; i++){
+                    bullets.push({
+                        x: player.x+13+offsets[i], 
+                        y: player.y-10,
+                        ...bulletConfig
+                    });
+                }
+                lastShootTime = now;
+            }
+
+            // 生成BOSS（保持原有）
+            if(weaponLevel >= 10 && !bossAppeared) {
+                bossAppeared = true;
+                boss.y = -80;
+            }
+
+            // 更新BOSS（仅添加血条绘制）
+            if(bossAppeared && !bossKilled) {
+                boss.y += boss.speed;
+                boss.x += boss.direction * 2;
+                if(boss.x < 0 || boss.x > 400 - boss.width) {
+                    boss.direction *= -1;
+                }
+                
+                // 绘制血条（新增部分）
+                drawBossHealth();
+                
+                // 保持原有BOSS绘制
+                ctx.fillStyle = boss.color;
+                ctx.fillRect(boss.x, boss.y, boss.width, boss.height);
+                ctx.strokeStyle = '#000';
+                ctx.strokeRect(boss.x, boss.y, boss.width, boss.height);
+            }
+
+            // 更新普通敌机（保持原有）
+            enemies = enemies.filter(enemy => {
+                enemy.y += enemyConfig.speed;
+                ctx.fillStyle = enemy.color;
+                ctx.fillRect(enemy.x, enemy.y, enemy.width, enemy.height);
+                return enemy.y < 630;
+            });
+
+            spawnEnemy();
+
+            // 更新子弹（保持原有）
+            bullets = bullets.filter(bullet => {
+                bullet.y -= bulletConfig.speed;
+                ctx.fillStyle = bullet.color;
+                ctx.fillRect(bullet.x, bullet.y, bullet.width, bullet.height);
+                return bullet.y > -20;
+            });
+
+            // 绘制玩家（保持原有）
+            ctx.fillStyle = player.color;
+            ctx.fillRect(player.x, player.y,30,40);
+            ctx.fillRect(player.x-10, player.y+10,10,10);
+            ctx.fillRect(player.x+30, player.y+10,10,10);
+            ctx.fillRect(player.x+10, player.y-10,10,10);
+
+            checkCollisions();
+            requestAnimationFrame(gameLoop);
+        }
+    </script>
+</body>
+</html>
