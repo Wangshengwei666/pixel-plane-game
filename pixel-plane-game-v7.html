@@ -1,0 +1,423 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <!-- 保持原有样式不变 -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <style>
+        * { margin:0; padding:0; box-sizing:border-box; }
+        body { overflow:hidden; background:#000; touch-action:none; }
+        #gameContainer { 
+            position: fixed;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+        #gameCanvas {
+            background:#111;
+            border:2px solid #333;
+            image-rendering:crisp-edges;
+            max-width: 100%;
+            max-height: 100%;
+            object-fit: contain;
+        }
+        #gameInfo {
+            position:absolute;
+            top:10px;
+            left:10px;
+            color:#FFF;
+            font-family:Arial;
+            font-size:20px;
+            text-shadow:2px 2px #000;
+            z-index:1;
+        }
+        #gameOver { position:absolute; color:#FF0000; font-size:40px; display:none; text-shadow:2px 2px #000; }
+        #gameWin { position:absolute; color:#00FF00; font-size:40px; display:none; text-shadow:2px 2px #000; }
+        
+        /* 新增战绩面板样式 */
+        #historyPanel {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(0,0,0,0.9);
+            color: white;
+            padding: 20px;
+            border: 2px solid #444;
+            border-radius: 10px;
+            max-width: 90%;
+            max-height: 80vh;
+            overflow-y: auto;
+            display: none;
+            z-index: 1000;
+            font-family: Arial;
+        }
+        #historyPanel h3 {
+            margin-bottom: 10px;
+            color: #FFD700;
+            text-align: center;
+        }
+        .historyItem {
+            margin: 5px 0;
+            padding: 8px;
+            border-bottom: 1px solid #333;
+            font-size: 14px;
+        }
+        #closeHistory {
+            position: absolute;
+            top: 5px;
+            right: 10px;
+            color: white;
+            font-size: 24px;
+            cursor: pointer;
+            user-select: none;
+        }
+    </style>
+</head>
+<body>
+    <!-- 保持原有HTML结构不变 -->
+    <div id="gameContainer">
+        <div id="gameInfo">分数: <span id="score">0</span> 等级: <span id="weaponLevel">1</span></div>
+        <div id="gameOver">游戏结束!</div>
+        <div id="gameWin">胜利!</div>
+        <canvas id="gameCanvas"></canvas>
+    </div>
+
+    <div id="historyPanel">
+        <div id="closeHistory">×</div>
+        <h3>历史战绩</h3>
+        <div id="historyList"></div>
+    </div>
+
+    <script>
+        // ================ 修复1：先初始化canvas ================
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        let gameScale = 1;
+
+        // ================ 战绩系统保持不变 ================
+        let gameRecords = JSON.parse(localStorage.getItem('gameRecords') || '[]');
+        let currentGameId = gameRecords.length + 1;
+
+        function saveGameRecord(isWin) {
+            const record = {
+                id: currentGameId++,
+                result: isWin ? '胜利' : '失败',
+                score: score,
+                date: new Date().toLocaleString()
+            };
+            gameRecords.push(record);
+            localStorage.setItem('gameRecords', JSON.stringify(gameRecords));
+        }
+
+        function showHistory() {
+            const panel = document.getElementById('historyPanel');
+            const list = document.getElementById('historyList');
+            list.innerHTML = '';
+            
+            gameRecords.slice().reverse().forEach(record => {
+                const item = document.createElement('div');
+                item.className = 'historyItem';
+                item.innerHTML = `#${record.id} [${record.date}]<br>${record.result} - 得分: ${record.score}`;
+                list.appendChild(item);
+            });
+            
+            panel.style.display = 'block';
+        }
+
+        function closeHistory() {
+            document.getElementById('historyPanel').style.display = 'none';
+        }
+
+        document.getElementById('closeHistory').addEventListener('click', closeHistory);
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'q' || e.key === 'Q') {
+                if (document.getElementById('historyPanel').style.display === 'block') {
+                    closeHistory();
+                } else {
+                    showHistory();
+                }
+            }
+        });
+
+        // ================ 新增手机端查询（修复2：正确的事件处理） ================
+        let lastTouchTime = 0;
+        canvas.addEventListener('touchstart', function(e) {
+            e.preventDefault();
+            const touch = e.touches[0];
+            const rect = canvas.getBoundingClientRect();
+            const x = (touch.clientX - rect.left) / gameScale;
+            
+            // 只在右侧25%区域检测（400 * 0.75=300）
+            if (x > 300) {
+                const now = Date.now();
+                if (now - lastTouchTime < 300) {
+                    showHistory();
+                }
+                lastTouchTime = now;
+            } else {
+                // 原有触摸控制逻辑保持不变
+                touchStartX = x;
+                touchStartY = (touch.clientY - rect.top) / gameScale;
+                isTouching = true;
+            }
+        });
+
+        // ================ 后续原有游戏代码完全保持不变 ================
+        function resizeCanvas() {
+            const designWidth = 400;
+            const designHeight = 600;
+            
+            const scaleX = window.innerWidth / designWidth;
+            const scaleY = window.innerHeight / designHeight;
+            gameScale = Math.min(scaleX, scaleY);
+            
+            canvas.width = designWidth * devicePixelRatio;
+            canvas.height = designHeight * devicePixelRatio;
+            
+            canvas.style.width = `${designWidth * gameScale}px`;
+            canvas.style.height = `${designHeight * gameScale}px`;
+            
+            ctx.scale(devicePixelRatio, devicePixelRatio);
+        }
+
+        window.addEventListener('resize', resizeCanvas);
+        window.addEventListener('load', () => {
+            resizeCanvas();
+            gameLoop();
+        });
+
+        let score = 0;
+        let gameRunning = true;
+        let weaponLevel = 1;
+        let bossAppeared = false;
+        let bossHealth = 20;
+        let bossKilled = false;
+
+        const player = {
+            x: 185, y: 500, width:30, height:40, speed:6, color:'#00FF00'
+        };
+
+        let bullets = [];
+        const bulletConfig = { speed:8, width:4, height:12, color:'#FFFF00', interval:300 };
+        let lastShootTime = 0;
+
+        let enemies = [];
+        const enemyConfig = {
+            baseSpeed: 2.5,
+            baseInterval: 1000,
+            get speed() { return this.baseSpeed + weaponLevel*0.5; },
+            width:30, height:30,
+            colors: ['#FF0000','#FF00FF','#00FFFF'],
+            lastSpawn:0
+        };
+
+        let boss = {
+            x: 150,
+            y: -100,
+            width: 80,
+            height: 80,
+            speed: 1.5,
+            color: '#FF4500',
+            direction: 1
+        };
+
+        function drawBossHealth() {
+            if(!bossAppeared || bossKilled) return;
+            
+            ctx.fillStyle = '#333';
+            ctx.fillRect(boss.x, boss.y - 15, boss.width, 4);
+            
+            const healthWidth = (bossHealth/20) * boss.width;
+            ctx.fillStyle = '#FF0000';
+            ctx.fillRect(boss.x, boss.y - 15, healthWidth, 4);
+        }
+
+        const keys = {};
+        window.addEventListener('keydown', (e) => keys[e.key] = true);
+        window.addEventListener('keyup', (e) => keys[e.key] = false);
+
+        // 触摸控制
+        let touchStartX = 0, touchStartY = 0, isTouching = false;
+        canvas.addEventListener('touchmove', (e) => {
+            e.preventDefault();
+            if (!isTouching) return;
+            const touch = e.touches[0];
+            const rect = canvas.getBoundingClientRect();
+            const x = (touch.clientX - rect.left) / gameScale;
+            const y = (touch.clientY - rect.top) / gameScale;
+            
+            player.x += (x - touchStartX) * 2;
+            player.y += (y - touchStartY) * 2;
+            player.x = Math.max(0, Math.min(370, player.x));
+            player.y = Math.max(0, Math.min(560, player.y));
+            touchStartX = x;
+            touchStartY = y;
+        });
+        canvas.addEventListener('touchend', () => isTouching = false);
+
+        function spawnEnemy() {
+            if(bossAppeared) return;
+            
+            const now = Date.now();
+            if (now - enemyConfig.lastSpawn > enemyConfig.baseInterval) {
+                for(let i=0; i<Math.min(weaponLevel,3); i++){ 
+                    enemies.push({
+                        x: Math.random()*(400-30),
+                        y: -30 - i*40,
+                        width:enemyConfig.width,
+                        height:enemyConfig.height,
+                        color: enemyConfig.colors[Math.floor(Math.random()*3)]
+                    });
+                }
+                enemyConfig.lastSpawn = now;
+            }
+        }
+
+        function checkCollisions() {
+            bullets.forEach((bullet, bIndex) => {
+                enemies.forEach((enemy, eIndex) => {
+                    if (bullet.x < enemy.x + enemyConfig.width &&
+                        bullet.x + bulletConfig.width > enemy.x &&
+                        bullet.y < enemy.y + enemyConfig.height &&
+                        bullet.y + bulletConfig.height > enemy.y) {
+                        
+                        bullets.splice(bIndex,1);
+                        enemies.splice(eIndex,1);
+                        score += 10 * weaponLevel;
+                        document.getElementById('score').textContent = score;
+
+                        const newLevel = Math.min(10, Math.floor(score/500)+1);
+                        if(newLevel !== weaponLevel){
+                            weaponLevel = newLevel;
+                            document.getElementById('weaponLevel').textContent = weaponLevel;
+                        }
+                    }
+                });
+
+                if(bossAppeared && !bossKilled) {
+                    if (bullet.x < boss.x + boss.width &&
+                        bullet.x + bulletConfig.width > boss.x &&
+                        bullet.y < boss.y + boss.height &&
+                        bullet.y + bulletConfig.height > boss.y) {
+                        
+                        bullets.splice(bIndex,1);
+                        bossHealth--;
+                        if(bossHealth <= 0) {
+                            bossKilled = true;
+                            document.getElementById('gameWin').style.display = 'block';
+                        }
+                    }
+                }
+            });
+
+            enemies.forEach(enemy => {
+                if (player.x < enemy.x + enemyConfig.width &&
+                    player.x + player.width > enemy.x &&
+                    player.y < enemy.y + enemyConfig.height &&
+                    player.y + player.height > enemy.y) {
+                    gameRunning = false;
+                    document.getElementById('gameOver').style.display = 'block';
+                    saveGameRecord(false);
+                    showHistory();
+                }
+            });
+
+            if(bossAppeared && !bossKilled) {
+                if (player.x < boss.x + boss.width &&
+                    player.x + player.width > boss.x &&
+                    player.y < boss.y + boss.height &&
+                    player.y + player.height > boss.y) {
+                    gameRunning = false;
+                    document.getElementById('gameOver').style.display = 'block';
+                    saveGameRecord(false);
+                    showHistory();
+                }
+            }
+        }
+
+        function gameLoop() {
+            if (!gameRunning) return;
+
+            ctx.clearRect(0, 0, 400, 600);
+
+            if (keys.ArrowLeft) player.x = Math.max(0, player.x - player.speed);
+            if (keys.ArrowRight) player.x = Math.min(370, player.x + player.speed);
+            if (keys.ArrowUp) player.y = Math.max(0, player.y - player.speed);
+            if (keys.ArrowDown) player.y = Math.min(560, player.y + player.speed);
+
+            const now = Date.now();
+            if (now - lastShootTime > bulletConfig.interval) {
+                const offsets = [-10,0,10];
+                for(let i=0; i<weaponLevel; i++){
+                    bullets.push({
+                        x: player.x+13+offsets[i], 
+                        y: player.y-10,
+                        ...bulletConfig
+                    });
+                }
+                lastShootTime = now;
+            }
+
+            if(weaponLevel >= 10 && !bossAppeared) {
+                bossAppeared = true;
+                boss.y = -80;
+            }
+
+            if(bossAppeared && !bossKilled) {
+                boss.y += boss.speed;
+                boss.x += boss.direction * 2;
+                if(boss.x < 0 || boss.x > 400 - boss.width) {
+                    boss.direction *= -1;
+                }
+                
+                drawBossHealth();
+                ctx.fillStyle = boss.color;
+                ctx.fillRect(boss.x, boss.y, boss.width, boss.height);
+                
+                ctx.fillStyle = '#FFFFFF';
+                ctx.font = '20px Arial';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText('BOSS', boss.x + boss.width/2, boss.y + boss.height/2);
+                
+                ctx.strokeStyle = '#000';
+                ctx.strokeRect(boss.x, boss.y, boss.width, boss.height);
+            }
+
+            enemies = enemies.filter(enemy => {
+                enemy.y += enemyConfig.speed;
+                ctx.fillStyle = enemy.color;
+                ctx.fillRect(enemy.x, enemy.y, enemy.width, enemy.height);
+                return enemy.y < 630;
+            });
+
+            spawnEnemy();
+
+            bullets = bullets.filter(bullet => {
+                bullet.y -= bulletConfig.speed;
+                ctx.fillStyle = bullet.color;
+                ctx.fillRect(bullet.x, bullet.y, bullet.width, bullet.height);
+                return bullet.y > -20;
+            });
+
+            ctx.fillStyle = player.color;
+            ctx.fillRect(player.x, player.y,30,40);
+            ctx.fillRect(player.x-10, player.y+10,10,10);
+            ctx.fillRect(player.x+30, player.y+10,10,10);
+            ctx.fillRect(player.x+10, player.y-10,10,10);
+
+            checkCollisions();
+            
+            if(bossKilled && gameRunning) {
+                saveGameRecord(true);
+                showHistory();
+                gameRunning = false;
+            }
+
+            requestAnimationFrame(gameLoop);
+        }
+    </script>
+</body>
+</html>
